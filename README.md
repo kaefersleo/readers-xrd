@@ -1,7 +1,7 @@
 # fairmat-readers-xrd
 
-Readers for X-ray diffraction files from PANalytical (`.xrdml`),
-Rigaku (`.rasx`) and Bruker (`.brml`, RAW v4 `.raw`).
+A package developed by FAIRmat and collaborators that contains file readers for various
+X-ray diffraction (XRD) file formats.
 
 ## Install and use
 

@@ -1,7 +1,32 @@
-# SPDX-FileCopyrightText: The NOMAD Authors
-# SPDX-License-Identifier: Apache-2.0
+#
+# Copyright The NOMAD Authors.
+#
+# This file is part of NOMAD. See https://nomad-lab.eu for further info.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+"""
+Test module for the Bruker/Siemens RAW v4 parser and reader.
 
-"""Regression checks for native RAW4 output."""
+The tests cover:
+
+- Parser initialization and reading a RAW4 header.
+- Extraction of metadata, scan parameters and intensities.
+- Generation of angles and consistency of angle and intensity arrays.
+- Reader output structure and units, including source wavelengths.
+- Omission of unknown start angles and step sizes from XY headers.
+- Rejection of truncated scan data by the parser and reader.
+"""
 
 import os
 
