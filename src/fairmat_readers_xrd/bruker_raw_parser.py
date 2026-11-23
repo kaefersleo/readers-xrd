@@ -19,30 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from fairmat_readers_xrd.wavelengths import K_ALPHA_WAVELENGTHS
-
-# Kα references are shared with NM; retain the existing Kβ values and 2:1 ratio.
-XRAY_WAVELENGTHS = {
-    material: {
-        'K_alpha1': K_ALPHA_WAVELENGTHS[material][0],
-        'K_alpha2': K_ALPHA_WAVELENGTHS[material][1],
-        'K_beta': k_beta,
-        'K_alpha_avg': (
-            2 * K_ALPHA_WAVELENGTHS[material][0] + K_ALPHA_WAVELENGTHS[material][1]
-        )
-        / 3,
-        'K_alpha2_K_alpha1_ratio': 0.5,
-    }
-    for material, k_beta in {
-        'Cu': 1.392250,
-        'Mo': 0.632305,
-        'Co': 1.620830,
-        'Fe': 1.757462,
-        'Cr': 2.084920,
-        'Ag': 0.497082,
-    }.items()
-}
-
+from fairmat_readers_xrd.wavelengths import XRAY_WAVELENGTHS
 
 # RAW4 block identifiers and fixed header sizes (bytes).
 _BLOCK_HEADER = 8
@@ -57,11 +34,28 @@ _INTENSITY_BYTES = 4
 
 
 class BrukerRAW4Parser:
-    """Read a single RAW4 powder range using its declared block and record sizes.
+    """
+    Parser for Siemens/Bruker RAW v4 binary files (single-axis powder diffraction).
 
-    The range/drive layout follows GSAS-II's G2pwd_BrukerRAW reader. Only the
-    locally validated Locked Coupled geometry is accepted; other modes need
-    independent reference files before their axis semantics can be supported.
+    IMPORTANT SCOPE LIMITATION:
+    This parser is designed for SINGLE-AXIS theta-2theta powder diffraction scans.
+    It reads one Locked Coupled measurement range and reports the scan axis
+    as "2Theta".
+
+    NOT SUPPORTED:
+    - Multi-axis scans (texture, pole figures, reciprocal space maps)
+    - Other scan modes or multiple measurement ranges
+    - Extraction of additional goniometer angles (omega, chi, phi) if present
+
+    File Structure (RAW v4):
+    - Header: 8 bytes ("RAW4.00\x00")
+    - Metadata blocks with tags (USER, SITE, SAMPLEID, COMMENT, CREATOR)
+    - Measurement parameters (start angle, step, count, scan mode, etc.)
+    - Intensity data (one float32 per record, spaced by the declared record size)
+
+    Note: Format is proprietary and not fully documented. The parser uses the
+    declared block sizes. The range and drive layouts follow GSAS-II's
+    G2pwd_BrukerRAW reader and may not generalize to all RAW v4 variants.
     """
 
     HEADER_MAGIC = b'RAW4.00\x00'
@@ -76,19 +70,40 @@ class BrukerRAW4Parser:
     }
 
     def __init__(self, filepath: str):
+        """
+        Initialize parser with RAW file path.
+
+        Args:
+            filepath: Path to .raw file
+        """
         self.filepath = Path(filepath)
         self.metadata = {}
         self.scan_params = {}
         self.intensities = None
-        self.angles = None
+        self.angles: list[float] | None = None
         self.logger = logging.getLogger(__name__)
 
     @staticmethod
-    def _text(data):
+    def _text(data: bytes) -> str:
+        """Decode a null-terminated RAW4 text field as Latin-1 and strip whitespace."""
         return data.split(b'\x00', 1)[0].decode('latin-1').strip()
 
     @staticmethod
-    def _block(data, offset, end):
+    def _block(data: bytes, offset: int, end: int) -> tuple[int, int]:
+        """
+        Read a RAW4 block header and check that the block fits within its section.
+
+        Args:
+            data (bytes): Contents of the RAW4 file.
+            offset (int): Byte offset of the block header.
+            end (int): Exclusive byte limit of the enclosing section.
+
+        Returns:
+            tuple[int, int]: Block identifier and declared size in bytes.
+
+        Raises:
+            ValueError: If the header is truncated or the block length is invalid.
+        """
         if offset + _BLOCK_HEADER > end:
             raise ValueError('Truncated RAW4 block header.')
         kind, size = struct.unpack_from('<II', data, offset)
@@ -97,6 +112,18 @@ class BrukerRAW4Parser:
         return kind, size
 
     def parse(self) -> dict[str, Any]:
+        """
+        Parse the RAW file and extract scan data and metadata.
+
+        Returns:
+            Dictionary containing metadata, scan parameters, intensity data, and angles.
+
+        Raises:
+            ValueError: If the RAW file is invalid or the scan is unsupported.
+
+        Warnings:
+            Logs a warning when a negative or non-finite source value is ignored.
+        """
         data = self.filepath.read_bytes()
         if not data.startswith(self.HEADER_MAGIC) or len(data) < _PREAMBLE:
             raise ValueError('Invalid or truncated RAW4 header.')
@@ -127,7 +154,17 @@ class BrukerRAW4Parser:
             angles=self.angles,
         )
 
-    def _read_source(self, block):
+    def _read_source(self, block: bytes) -> None:
+        """
+        Extract the anode material and source wavelengths from a RAW4 source block.
+
+        The parser uses reference values for negative or non-finite entries when
+        available. Zero wavelengths are treated as missing. A zero intensity ratio
+        is retained.
+
+        Args:
+            block (bytes): Source block including its header.
+        """
         fields = (
             ('wavelength_kalpha_avg', 'K_alpha_avg'),
             ('wavelength_kalpha1', 'K_alpha1'),
@@ -150,7 +187,20 @@ class BrukerRAW4Parser:
                 value = None
             self.metadata[key] = value
 
-    def _read_range(self, data, offset):
+    def _read_range(self, data: bytes, offset: int) -> None:
+        """
+        Read a single Locked Coupled range into the parser's scan data.
+
+        Intensity records provide one value per point. The parser reconstructs
+        the 2Theta coordinates from the start angle and step size.
+
+        Args:
+            data (bytes): Contents of the RAW4 file.
+            offset (int): Byte offset of the range header.
+
+        Raises:
+            ValueError: If the range is incomplete, inconsistent, or unsupported.
+        """
         if offset + 160 > len(data):
             raise ValueError('Truncated RAW4 range header.')
         mode = self._text(data[offset + 32 : offset + 56])

@@ -1,12 +1,20 @@
 """Optional nominal counting times, independent of detector channel count."""
 
+from typing import TYPE_CHECKING, Any
+
 import numpy as np
 import pint
+from numpy.typing import ArrayLike
+
+if TYPE_CHECKING:
+    from structlog.stdlib import BoundLogger
 
 ureg = pint.get_application_registry()
 
 
-def counting_time(value, unit, logger=None):
+def counting_time(
+    value: ArrayLike | None, unit: str | None, logger: 'BoundLogger | None' = None
+) -> pint.Quantity | None:
     """Return positive finite times in seconds, or omit unusable optional metadata."""
     if value is None or unit is None:
         return None
@@ -26,7 +34,9 @@ def counting_time(value, unit, logger=None):
         return None
 
 
-def rasx_counting_time(info, logger=None):
+def rasx_counting_time(
+    info: dict[str, Any], logger: 'BoundLogger | None' = None
+) -> pint.Quantity | None:
     """STEP Speed is a duration; CONTINUOUS Step/Speed is a nominal point time."""
     try:
         mode = str(info.get('Mode', '')).upper()
@@ -45,7 +55,9 @@ def rasx_counting_time(info, logger=None):
     return None
 
 
-def complete_scan_times(values, logger=None):
+def complete_scan_times(
+    values: list[pint.Quantity | None], logger: 'BoundLogger | None' = None
+) -> list[pint.Quantity | None] | None:
     """Keep scan order; omit incomplete metadata instead of inventing missing times."""
     if not values or any(value is None for value in values):
         if any(value is not None for value in values) and logger is not None:

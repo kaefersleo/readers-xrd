@@ -19,25 +19,47 @@
 
 import hashlib
 import re
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
+from xml.etree.ElementTree import Element
 
 import numpy as np
 import pint
 
+if TYPE_CHECKING:
+    from structlog.stdlib import BoundLogger
+
+    from fairmat_readers_xrd.ikz import BRMLfile, RASXfile
+
 ureg = pint.get_application_registry()
 
 
-def _text(value):
+def _text(value: object) -> str | None:
+    """Strip whitespace from text and return None for blank or non-string values."""
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def _key(prefix, value):
+def _key(prefix: str, value: object) -> str:
     """Keep distinct source identities even when their display labels coincide."""
     label = re.sub(r'[^a-zA-Z0-9_]+', '_', str(value)).strip('_')[:40]
     digest = hashlib.sha256(str(value).encode()).hexdigest()[:10]
     return f'{prefix}_{label}_{digest}'
 
 
-def _record(key, values, sources):
+def _record(
+    key: str, values: dict[str, Any], sources: Mapping[str, str | list[str]]
+) -> dict[str, Any]:
+    """
+    Build a metadata record with its source paths.
+
+    Args:
+        key (str): Identifier used to group matching records.
+        values (dict): Metadata fields and their values.
+        sources (dict): Source path or list of paths for each retained field.
+
+    Returns:
+        dict: The record key, values other than None or blank text, and lists of paths.
+    """
     values = {
         name: value
         for name, value in values.items()
@@ -53,7 +75,8 @@ def _record(key, values, sources):
     }
 
 
-def _same(left, right):
+def _same(left: Any, right: Any) -> bool:
+    """Compare metadata values exactly after converting compatible quantities."""
     if left is None or right is None:
         return left is right
     if hasattr(left, 'units'):
@@ -63,9 +86,11 @@ def _same(left, right):
     return np.array_equal(left, right)
 
 
-def _collapse(records, logger=None):
+def _collapse(
+    records: list[dict[str, Any]], logger: 'BoundLogger | None' = None
+) -> list[dict[str, Any]]:
     """Merge identical scan headers; omit conflicting fields instead of picking one."""
-    groups = {}
+    groups: dict[str, list[dict[str, Any]]] = {}
     for record in records:
         groups.setdefault(record['key'], []).append(record)
     output = []
@@ -91,7 +116,27 @@ def _collapse(records, logger=None):
     return output
 
 
-def _quantity(text, unit, path, logger, category=None):
+def _quantity(
+    text: str | float | None,
+    unit: str | None,
+    path: str,
+    logger: 'BoundLogger | None',
+    category: str | None = None,
+) -> pint.Quantity | None:
+    """
+    Read an optional metadata value as a finite Pint quantity.
+
+    Args:
+        text: Numeric value or its representation in the source file.
+        unit (str): Unit reported in the source file.
+        path (str): Source path to include in warnings.
+        logger (BoundLogger or None): Logger for invalid values, if provided.
+        category (str, optional): Unit the reported quantity must be compatible with.
+
+    Returns:
+        pint.Quantity or None: The reported quantity, or None if it is missing
+            or invalid.
+    """
     if text is None or not unit:
         return None
     try:
@@ -107,8 +152,28 @@ def _quantity(text, unit, path, logger, category=None):
         return None
 
 
-def xrdml_metadata(root, measurement, scans, ns, logger=None):
-    details = {
+def xrdml_metadata(
+    root: Element,
+    measurement: Element,
+    scans: list[Element],
+    ns: dict[str, str],
+    logger: 'BoundLogger | None' = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """
+    Extract reported sample, scan, and instrument metadata from XRDML.
+
+    Args:
+        root: Root element of the XRDML document.
+        measurement: Measurement element that contains the scans and beam paths.
+        scans: Scan elements in the order they appear in the measurement.
+        ns (dict): Namespace mapping used to find XRDML elements.
+        logger (BoundLogger, optional): Logger for invalid or conflicting metadata.
+
+    Returns:
+        dict: Metadata records grouped by category, with source paths for
+            each retained field.
+    """
+    details: dict[str, list[dict[str, Any]]] = {
         'users': [],
         'notes': [],
         'instrument_notes': [],
@@ -156,14 +221,14 @@ def xrdml_metadata(root, measurement, scans, ns, logger=None):
         control = scan.find(
             'xrdml:header/xrdml:source/xrdml:instrumentControlSoftware', ns
         )
-        if control is not None and _text(control.text):
-            text = f'Instrument control software: {control.text.strip()}'
-            if _text(control.get('version')):
-                text += f' (version {control.get("version").strip()})'
+        if control is not None and (control_name := _text(control.text)):
+            control_text = f'Instrument control software: {control_name}'
+            if version := _text(control.get('version')):
+                control_text += f' (version {version})'
             details['instrument_notes'].append(
                 _record(
-                    _key('control_software', text),
-                    {'text': text},
+                    _key('control_software', control_text),
+                    {'text': control_text},
                     {'text': f'{base}/source/instrumentControlSoftware'},
                 )
             )
@@ -196,7 +261,7 @@ def xrdml_metadata(root, measurement, scans, ns, logger=None):
         beam = measurement.find(f'xrdml:{side}', ns)
         if beam is None:
             continue
-        occurrences = {}
+        occurrences: dict[str, int] = {}
         for node in beam:
             tag = node.tag.rsplit('}', 1)[-1]
             occurrences[tag] = occurrences.get(tag, 0) + 1
@@ -221,7 +286,8 @@ def xrdml_metadata(root, measurement, scans, ns, logger=None):
                 'parallelPlateCollimator',
                 'beamAttenuator',
             ):
-                values, sources = {'name': name}, {'name': f'{base}/@name'}
+                values: dict[str, Any] = {'name': name}
+                sources: dict[str, str | list[str]] = {'name': f'{base}/@name'}
                 if tag == 'monochromator':
                     values['chemical_formula'] = _text(
                         node.findtext('xrdml:crystal', namespaces=ns)
@@ -282,8 +348,24 @@ def xrdml_metadata(root, measurement, scans, ns, logger=None):
     return {family: _collapse(records, logger) for family, records in details.items()}
 
 
-def rasx_metadata(reader, logger=None):
-    details = {
+def rasx_metadata(
+    reader: 'RASXfile', logger: 'BoundLogger | None' = None
+) -> dict[str, list[dict[str, Any]]]:
+    """
+    Extract metadata from the measurement conditions of RASX profiles.
+
+    Fixed axis positions are included when all profiles report them with
+    compatible units. The positions follow the original profile order.
+
+    Args:
+        reader (RASXfile): Parsed RASX file with profiles and their metadata paths.
+        logger (BoundLogger, optional): Logger for invalid or conflicting metadata.
+
+    Returns:
+        dict: Metadata records grouped by category, with source paths for
+            each retained field.
+    """
+    details: dict[str, list[dict[str, Any]]] = {
         'users': [],
         'notes': [],
         'instrument_notes': [],
@@ -417,18 +499,37 @@ def rasx_metadata(reader, logger=None):
     return {family: _collapse(records, logger) for family, records in details.items()}
 
 
-def _as_list(value):
+def _as_list(
+    value: dict[str, Any] | list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Wrap a single XML entry in a list and use an empty list for missing entries."""
     return value if isinstance(value, list) else [value] if value else []
 
 
-def brml_metadata(reader, logger=None):
-    details = {'positioners': [], 'detector': []}
+def brml_metadata(
+    reader: 'BRMLfile', logger: 'BoundLogger | None' = None
+) -> dict[str, list[dict[str, Any]]]:
+    """
+    Extract fixed drive positions and instrument metadata from BRML.
+
+    Drive positions are included when every scan provides values with
+    compatible units. The positions follow the order of the RawData files.
+
+    Args:
+        reader (BRMLfile): Parsed BRML file with the drive and instrument records.
+        logger (BoundLogger, optional): Logger for invalid or conflicting metadata.
+
+    Returns:
+        dict: Metadata records grouped by category, with source paths for
+            each retained field.
+    """
+    details: dict[str, list[dict[str, Any]]] = {'positioners': [], 'detector': []}
     for name, entries in reader.motors.items():
         if len(entries) != len(reader.data['ScanName']) or any(
             entry is None for entry in entries
         ):
             continue
-        values = [
+        positions = [
             _quantity(
                 entry.get('Value'), entry.get('Unit'), f'Drives/{name}/Position', logger
             )
@@ -439,11 +540,11 @@ def brml_metadata(reader, logger=None):
             or not (
                 value.is_compatible_with('radian') or value.is_compatible_with('meter')
             )
-            for value in values
+            for value in positions
         ):
             continue
-        unit = values[0].units
-        if not all(value.is_compatible_with(unit) for value in values):
+        unit = positions[0].units
+        if not all(value.is_compatible_with(unit) for value in positions):
             continue
         details['positioners'].append(
             _record(
@@ -453,7 +554,7 @@ def brml_metadata(reader, logger=None):
                     'description': (
                         'Reported fixed drive position, in original RawData order.'
                     ),
-                    'value': np.array([value.to(unit).magnitude for value in values])
+                    'value': np.array([value.to(unit).magnitude for value in positions])
                     * unit,
                 },
                 {
@@ -494,7 +595,8 @@ def brml_metadata(reader, logger=None):
                     name = _text(node.get('@VisibleName'))
                     kind = node.get('@xsi:type', '')
                     class_path = node.get('BeringInfo', {}).get('@ClassPath', '')
-                    values, sources = {'name': name}, {'name': f'{base}/@VisibleName'}
+                    values: dict[str, Any] = {'name': name}
+                    sources = {'name': f'{base}/@VisibleName'}
                     tube = node.get('Tube', {})
                     serial = _text(tube.get('SerialNumber', {}).get('@Value'))
                     if serial:
@@ -558,8 +660,17 @@ def brml_metadata(reader, logger=None):
     return {family: _collapse(records, logger) for family, records in details.items()}
 
 
-def raw_metadata(metadata):
-    details = {'users': [], 'notes': [], 'program': []}
+def raw_metadata(metadata: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """
+    Collect user, comment, and acquisition program metadata from parsed RAW4 data.
+
+    Args:
+        metadata (dict): Values extracted by the RAW4 parser.
+
+    Returns:
+        dict: Lists of user, note, and program records with their source tags.
+    """
+    details: dict[str, list[dict[str, Any]]] = {'users': [], 'notes': [], 'program': []}
     user = _text(metadata.get('user'))
     if user:
         details['users'].append(

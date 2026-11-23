@@ -16,16 +16,20 @@
 # limitations under the License.
 #
 import collections
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, cast
 
 import numpy as np
 import pint
+from numpy.typing import ArrayLike
 
 ureg = pint.get_application_registry()
 MAX_SUPPORTED_INTENSITY_DIMENSIONS = 2
 
 
-def intensity_quantity(values, unit=None, *, prefix=None):
+def intensity_quantity(
+    values: ArrayLike, unit: str | None = None, *, prefix: str | None = None
+) -> pint.Quantity:
     """Decode counts or an explicit count rate without normalizing by time."""
     aliases = {
         'counts': 'count',
@@ -72,7 +76,11 @@ def to_pint_quantity(value: Any = None, unit: str = None) -> Any:
     return value * ureg(unit)
 
 
-def are_all_identical(arr_list):
+def are_all_identical(
+    arr_list: np.ndarray
+    | Sequence[pint.Quantity]
+    | Sequence[np.ndarray | complex | Sequence[complex]],
+) -> bool:
     """
     Check if all the arrays in the list are identical. Also works if the arrays are
     pint.Quantity.
@@ -89,7 +97,9 @@ def are_all_identical(arr_list):
         first_arr = first_arr.magnitude
 
     for arr in arr_list[1:]:
-        arr_magnitude = arr.to(unit).magnitude if unit is not None else arr
+        arr_magnitude = (
+            cast(pint.Quantity, arr).to(unit).magnitude if unit is not None else arr
+        )
         # Permit only floating-point unit-conversion roundoff.
         if np.shape(first_arr) != np.shape(arr_magnitude) or not np.allclose(
             first_arr, arr_magnitude, rtol=8 * np.finfo(float).eps, atol=0
@@ -98,7 +108,7 @@ def are_all_identical(arr_list):
     return True
 
 
-def detect_scan_type(scan_data):
+def detect_scan_type(scan_data: dict[str, Any]) -> str:
     """
     Based on the shape of data vectors, decide whether the scan_type is `line` (single
     line scan), `multiline` (multiple line scans), or `rsm` (reciprocal space mapping).
@@ -165,28 +175,35 @@ def detect_scan_type(scan_data):
     return 'multiline'
 
 
-def modify_scan_data(scan_data: dict, scan_type: str):
+def modify_scan_data(
+    scan_data: dict[str, list[pint.Quantity] | None], scan_type: str
+) -> dict[str, pint.Quantity | None]:
     """
     Modifies the scan data based on the scan type:
 
     If the scan type is `line`, the data is converted to 1D arrays.
+    Intensities and counts retain every point, even when all values are identical.
 
-    Intensity and counts retain every scan and point, including constant spectra.
-    For RSM, signal arrays are two-dimensional. Shared coordinates and optional
-    metadata may be reduced to vectors or a single value, in consistent units.
-
-    If the scan type is `multiline`, the data is converted into a list of 1D arrays.
-    Currently not implemented.
+    If the scan type is `rsm`, data is converted into 2D arrays in the unit of
+    the first scan for each field. Intensities, counts, and counting times with
+    multiple values per scan remain 2D. Reduction of dimensions is performed
+    for shared coordinates and other optional data where possible. For example,
+    an axis with one coordinate per scan can be represented as a 1D vector,
+    and identical coordinate rows can be reduced to the first row.
 
     Args:
-        scan_data (dict): The X-ray diffraction data in a Python dictionary. Each key is
-            a list of scan data as pint.Quantity arrays.
+        scan_data (dict): The X-ray diffraction data in a Python dictionary. Each value
+            is a list of scan data as pint.Quantity arrays or None.
         scan_type (str): The type of scan.
 
     Returns:
-        dict: scan_data containing same keys but modified values.
+        dict: scan_data containing modified values, with absent entries omitted.
+
+    Raises:
+        ValueError: If the scan type is unknown.
+        NotImplementedError: If the scan type is `multiline`.
     """
-    output = collections.defaultdict(lambda: None)
+    output: dict[str, pint.Quantity | None] = collections.defaultdict(lambda: None)
 
     if scan_type not in ['line', 'rsm', 'multiline']:
         raise ValueError(f'Invalid scan type: {scan_type}')

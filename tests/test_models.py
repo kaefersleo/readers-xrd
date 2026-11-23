@@ -83,7 +83,8 @@ def test_intensity_and_two_theta_lengths_must_match():
 def test_readers_validate_their_output(reader, path, monkeypatch):
     original = XRDOutput.model_validate
 
-    def remove_intensity(output):
+    def remove_intensity(output: dict[str, object]) -> XRDOutput:
+        """Pass an incomplete reader result to the real output validator."""
         incomplete = {k: v for k, v in output.items() if k != 'intensity'}
         return original(incomplete)
 

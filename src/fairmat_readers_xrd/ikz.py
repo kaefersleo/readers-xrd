@@ -9,9 +9,11 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 import zipfile
-from typing import TYPE_CHECKING
+from os import PathLike
+from typing import IO, TYPE_CHECKING, Any
 
 import numpy as np
+import pint
 import xmltodict
 
 if TYPE_CHECKING:
@@ -34,7 +36,9 @@ def try_scalar(val):
     return val
 
 
-def parse_rasx_metadata(xml):
+def parse_rasx_metadata(
+    xml: str | PathLike[str] | IO[bytes] | IO[str],
+) -> dict[str, Any]:
     mdata = dict()
     # xml.seek(0)
     tree = ET.parse(xml)
@@ -137,7 +141,9 @@ def parse_rasx_metadata(xml):
 
 
 class RASXfile:
-    def __init__(self, path, verbose=True):
+    def __init__(
+        self, path: str | PathLike[str] | IO[bytes], verbose: bool = True
+    ) -> None:
         with zipfile.ZipFile(path) as fh:
             # get the path for Profile<num>.txt
             profiles = [f.filename for f in fh.filelist if 'Profile' in f.filename]
@@ -184,6 +190,7 @@ class RASXfile:
                     meta.append(parse_rasx_metadata(xml))
                     self.metadata_paths.append(metafile)
                 optics = meta[-1]['HardwareConfig']['optics']
+                det_shape: tuple[int, ...]
                 if optics['Detector'] == 'HyPix3000(H)':
                     det_shape = 385, 775
                 elif optics['Detector'] == 'HyPix3000(V)':
@@ -232,7 +239,9 @@ class RASXfile:
 
         return output
 
-    def get_scan_data(self, logger: 'BoundLogger' = None):
+    def get_scan_data(
+        self, logger: 'BoundLogger | None' = None
+    ) -> dict[str, list[pint.Quantity | None]]:
         """
         Collect intensity, two_theta, and axis positions. If units are not available for
         two_theta or axis positions, they will default to 'deg'.
@@ -244,7 +253,7 @@ class RASXfile:
             Dict[str, Any]: Each element contains a list of scan data as ureg.Quantity
                 arrays.
         """
-        output = collections.defaultdict(list)
+        output: dict[str, list[pint.Quantity | None]] = collections.defaultdict(list)
         aliases = {
             'TwoTheta': '2Theta',
             '2Theta': '2Theta',
@@ -288,13 +297,14 @@ class RASXfile:
         """
         return self.meta[0].get('ScanInformation', {})
 
-    def get_source_info(self):
+    def get_source_info(self) -> dict[str, Any]:
         """
         Collects meta information of the X-ray source along with associated units.
 
         Returns:
-            Dict[str, Any]: Available source quantities with units and the target
-                name as a string. Missing quantities are omitted.
+            Dict[str, Any]: The dictionary contains 'TargetName' as reported and
+                numeric source values as Pint quantities. Missing values are
+                omitted, and numeric zero values are retained.
         """
         output = {}
         source = self.meta[0]['HardwareConfig']['xraygenerator']
@@ -330,7 +340,13 @@ class RASXfile:
 
 
 class BRMLfile:
-    def __init__(self, path, exp_nbr=0, encoding='utf-8', verbose=True):
+    def __init__(
+        self,
+        path: str | PathLike[str] | IO[bytes],
+        exp_nbr: int = 0,
+        encoding: str | None = 'utf-8',
+        verbose: bool = True,
+    ) -> None:
         self.path = path
         with zipfile.ZipFile(path, 'r') as fh:
             experiment = f'Experiment{exp_nbr}'
@@ -459,7 +475,9 @@ class BRMLfile:
                 self.mounted_optics_info = []
             # (block end) not originally part of Carsten's code
 
-    def get_scan_data(self, logger: 'BoundLogger' = None):
+    def get_scan_data(
+        self, logger: 'BoundLogger | None' = None
+    ) -> dict[str, list[pint.Quantity | None] | None]:
         """
         Collect intensity, two_theta, and axis positions. If units are not available for
         two_theta or axis positions, they will default to 'deg'.
@@ -509,7 +527,7 @@ class BRMLfile:
 
         return output
 
-    def get_scan_info(self):
+    def get_scan_info(self) -> dict[str, Any]:
         """
         Collects the scan information from self.data if available.
 
@@ -518,22 +536,24 @@ class BRMLfile:
         """
         output = collections.defaultdict(list)
         for key in ['ScanName', 'ScanMode', 'start_time']:
-            if self.data.get(key) is not None:
-                output[key] = self.data.get(key)[0]
+            if (values := self.data.get(key)) is not None:
+                output[key] = values[0]
         if self.data.get('end_time'):
             output['end_time'] = self.data['end_time'][-1]
 
         return output
 
-    def get_source_info(self):
+    def get_source_info(self) -> dict[str, str | pint.Quantity]:
         """
         Collects meta information of the X-ray source along with associated units.
 
         Returns:
-            Dict[str, Any]: Available source quantities with units and the tube
-                material as a string. Missing quantities are omitted.
+            Dict[str, Any]: The dictionary contains 'TubeMaterial' as reported
+                and numeric source values as Pint quantities. Missing values
+                are omitted. The dictionary is empty if no source information
+                is available.
         """
-        output = {}
+        output: dict[str, str | pint.Quantity] = {}
 
         source = {}
         for component in self.mounted_optics_info:

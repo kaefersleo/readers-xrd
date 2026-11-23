@@ -1,40 +1,114 @@
 # fairmat-readers-xrd
-
 A package developed by FAIRmat and collaborators that contains file readers for various
 X-ray diffraction (XRD) file formats.
 
 ## Install and use
+To use the readers, install the package using `pip` and import the `read_file`
+function. It will check the file extension and, using an appropriate file
+reader, return a Python dictionary containing the data.
 
-```bash
+```sh
 pip install fairmat-readers-xrd
 ```
-
-```python
+```py
 from fairmat_readers_xrd import read_file
 
-data = read_file("measurement.xrdml")
-intensity = data["intensity"]
+file_path = "<filepath>.xrdml"
+data_dict =  read_file(file_path)
 ```
 
-Readers return a dictionary containing measurement arrays, physical quantities
-with units, and available metadata. Original scan and point order is preserved.
-Count-scale signals are dimensionless; explicitly declared rates use `count/s`.
-Optional `countTime` values are nominal acquisition times in seconds, not total
-measurement duration or detector live time. Missing metadata remains absent.
+You can also import individual file readers.
+```py
+from fairmat_readers_xrd import read_panalytical_xrdml, read_bruker_raw
 
-RAW support is limited to one RAW4 `Locked Coupled` powder range.
-Other RAW versions, multiple ranges and unsupported modes are rejected.
+# Read PANalytical XRDML file
+file_path = "<filepath>.xrdml"
+data_dict = read_panalytical_xrdml(file_path)
+
+# Read Bruker/Siemens RAW v4 file
+raw_file_path = "<filepath>.raw"
+raw_data_dict = read_bruker_raw(raw_file_path)
+```
+
+The readers return Python dictionaries with measurement data, physical quantities
+with units, and available metadata. The original order of scans and measurement
+points is preserved. Count-scale signals are dimensionless, and signals declared
+in supported count-rate units are returned in `count/s`. When available,
+`countTime` gives the nominal acquisition time per point in seconds, distinct
+from the total measurement duration and detector live time. Missing metadata
+fields are omitted or set to `None`.
+
+Currently, the following file extensions are supported:
+
+| File Extension    | Corresponding Reader Function     | Vendor/Format                            | Notes                                    |
+| ----------------- | --------------------------------- | ---------------------------------------- | ---------------------------------------- |
+| `.xrdml`          | `read_panalytical_xrdml`          | PANalytical                              |                                          |
+| `.rasx`           | `read_rigaku_rasx`                | Rigaku                                   |                                          |
+| `.brml`           | `read_bruker_brml`                | Bruker                                   |                                          |
+| `.raw`            | `read_bruker_raw`                 | Bruker/Siemens RAW v4                    | Single-axis scans only, extracts anode material and wavelengths |
+
+**Note on `.raw` files**: The parser supports one **Bruker/Siemens RAW v4**
+measurement range in `Locked Coupled` mode for single-axis theta-2theta powder
+diffraction scans. It extracts:
+- Scan parameters (angles, step size, scan axis)
+- X-ray tube anode material from the RAW4 source block
+- Wavelengths (K-alpha1, K-alpha2, K-beta) from the RAW4 source block, with
+  reference values used as fallback where appropriate. The K-alpha1 and
+  K-alpha2 reference values come from the *International Tables for
+  Crystallography*.
+
+Other RAW versions, multiple measurement ranges and unsupported scan modes are
+rejected.
 
 ## Development
+The package is still under development. To contribute, start with simply raising an
+[issue](https://github.com/FAIRmat-NFDI/readers-xrd/issues) on the repo.
 
-Install an editable checkout with development dependencies:
-
-```bash
-pip install -e '.[dev]'
-pytest
-ruff check .
-ruff format . --check
+### Contributing code
+In case you want to contribute a piece of code, or a whole new reader, clone the repo in
+your local and start a virtual Python environment inside the directory.
+```sh
+git clone git@github.com:FAIRmat-NFDI/readers-xrd.git
+cd readers-xrd
+python3 -m venv .pyenv
+source .pyenv/bin/activate
 ```
 
-Include relevant tests when contributing. Open issues and pull requests on
-[GitHub](https://github.com/FAIRmat-NFDI/readers-xrd).
+Then install the package in editable mode (-e flag), with `dev` dependencies.
+You can also run the `pytest` to confirm all went well.
+As a recommended practice, you can also install the pre-commit hook for linting (more on
+this [here](#ruff-pre-commit-hook)).
+```sh
+python -m pip install --upgrade pip
+pip install -e .[dev]
+pytest
+pre-commit install
+```
+
+Now you can start tinkering around on a new branch (or a [fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo)).
+If you want to contribute the code back to the upstream, simply create a
+[Pull Request (PR)](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request),
+and we will get back to you. As a good practice, add tests for new readers and
+make sure existing tests (`pytest`) are passing before creating PR.
+
+### Ruff
+We have placed GitHub actions for checking the linting. This can lead to your PR failing
+the CI tests in case your code is not correctly linted or formatted.
+Best way to avoid this is to use [Ruff](https://docs.astral.sh/ruff/tutorial/) for
+automatic linting and formatting.
+This is already part of the `dev` environment and you can run Ruff before committing:
+```sh
+ruff check --fix
+ruff format
+```
+### Ruff pre-commit hook
+Additionally, we also provide [pre-commit](https://pre-commit.com) hook for Ruff. This
+will run Ruff every time you try to commit and raise errors (and provide fixes)
+in case your code needs linting or formatting. You simply have to add these fixes and
+commit again.
+
+To use this pre-commit hook, make sure to run the following in the terminal after you
+clone the repo:
+```sh
+pre-commit install
+```

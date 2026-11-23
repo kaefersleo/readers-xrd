@@ -16,16 +16,15 @@
 # limitations under the License.
 #
 """
-Test module for the Bruker/Siemens RAW v4 parser and reader.
+Test module for Bruker/Siemens RAW v4 file parser.
 
-The tests cover:
-
-- Parser initialization and reading a RAW4 header.
-- Extraction of metadata, scan parameters and intensities.
-- Generation of angles and consistency of angle and intensity arrays.
-- Reader output structure and units, including source wavelengths.
-- Omission of unknown start angles and step sizes from XY headers.
-- Rejection of truncated scan data by the parser and reader.
+Tests the native Python parser for Bruker/Siemens binary .raw files, including:
+- Binary file structure parsing
+- Metadata extraction
+- Intensity data extraction
+- Scan parameter extraction and angle generation
+- Reader output structure and units
+- XY export and rejection of truncated data
 """
 
 import os

@@ -3,6 +3,7 @@
 
 """Focused reader data contracts."""
 
+from collections.abc import Iterable
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
@@ -16,7 +17,10 @@ from fairmat_readers_xrd.timing import counting_time, rasx_counting_time
 from fairmat_readers_xrd.utils import detect_scan_type, modify_scan_data
 
 
-def intensity_xrdml_scan(unit, values='2 4', times='2 3', omega=1):
+def intensity_xrdml_scan(
+    unit: str, values: str = '2 4', times: str = '2 3', omega: float = 1
+) -> str:
+    """Build an XRDML scan with counting times in seconds and angles in degrees."""
     return f"""<scan scanAxis="2Theta"><dataPoints>
       <countingTimes unit="seconds">{times}</countingTimes>
       <intensities unit="{unit}">{values}</intensities>
@@ -26,7 +30,8 @@ def intensity_xrdml_scan(unit, values='2 4', times='2 3', omega=1):
       </positions></dataPoints></scan>"""
 
 
-def intensity_write_xrdml(tmp_path, scans):
+def intensity_write_xrdml(tmp_path: Path, scans: Iterable[str]) -> Path:
+    """Write scan fragments to a temporary XRDML file and return its path."""
     path = tmp_path / 'scan.xrdml'
     path.write_text(
         '<xrdMeasurements xmlns="http://www.xrdml.com/XRDMeasurement/2.1"><xrdMeasurement>'
@@ -74,6 +79,7 @@ ureg = pint.get_application_registry()
 @pytest.mark.parametrize('channels', [1, 7])
 @pytest.mark.parametrize('rows', [1, 3])
 def test_constant_signals_keep_all_points_and_repeated_scans(channels, rows):
+    """Check the output shape even for a single channel and repeated RSM rows."""
     scan = {
         'intensity': [np.full(channels, 5) * ureg.dimensionless] * rows,
         'counts': [np.full(channels, 2) * ureg.dimensionless] * rows,
@@ -92,6 +98,7 @@ def test_constant_signals_keep_all_points_and_repeated_scans(channels, rows):
 
 
 def test_brml_omega_matches_recorded_scan_coordinates(tmp_path):
+    """Verify that a recorded Omega change survives with the same scan endpoints."""
     path = Path(__file__).parent / 'data/23-012-AG_2thomegascan_long.brml'
     with ZipFile(path) as source:
         root = ET.fromstring(source.read('Experiment0/RawData0.xml'))
@@ -137,6 +144,7 @@ def test_brml_omega_matches_recorded_scan_coordinates(tmp_path):
     ],
 )
 def test_rasx_modes_have_distinct_time_meanings(mode, speed, unit, step, expected):
+    """Check that STEP uses a duration and CONTINUOUS divides step size by speed."""
     result = rasx_counting_time(
         dict(Mode=mode, Speed=speed, SpeedUnit=unit, Step=step, PositionUnit='deg')
     )

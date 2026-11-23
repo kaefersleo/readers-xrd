@@ -21,7 +21,24 @@ from fairmat_readers_xrd.metadata_extraction import raw_metadata
 from fairmat_readers_xrd.wavelengths import K_ALPHA_WAVELENGTHS
 
 
-def raw4_structure_raw4(points=5, record_size=4, extra_size=0, mode='Locked Coupled'):
+def raw4_structure_raw4(
+    points: int = 5,
+    record_size: int = 4,
+    extra_size: int = 0,
+    mode: str = 'Locked Coupled',
+) -> bytes:
+    """
+    Build a synthetic RAW4 file with a source block and one scan range.
+
+    Args:
+        points (int, optional): Number of intensity records in the range.
+        record_size (int, optional): Size of each intensity record in bytes.
+        extra_size (int, optional): Bytes to add to the unrecognized metadata block.
+        mode (str, optional): Scan mode stored in the range header.
+
+    Returns:
+        bytes: RAW4 file contents for the reader tests.
+    """
     preamble = bytearray(61)
     preamble[:8] = b'RAW4.00\x00'
     metadata = bytearray(8 + extra_size)
@@ -48,6 +65,7 @@ def raw4_structure_raw4(points=5, record_size=4, extra_size=0, mode='Locked Coup
 @pytest.mark.parametrize('record_size', [4, 12])
 @pytest.mark.parametrize('extra_size', [37])
 def test_raw4_uses_declared_sizes(tmp_path, record_size, extra_size):
+    """Read the scan after an unrecognized block and with varied record sizes."""
     path = tmp_path / 'scan.raw'
     path.write_bytes(
         raw4_structure_raw4(record_size=record_size, extra_size=extra_size)
@@ -93,6 +111,7 @@ def test_raw4_rejects_unsupported_or_incomplete_data(tmp_path, bad):
 
 
 def test_rasx_omega_profile_is_not_two_theta(tmp_path):
+    """Read a profile that scans Omega while the detector angle stays fixed."""
     source = Path(__file__).parent / 'data/TwoTheta_scan_powder.rasx'
     with ZipFile(source) as archive:
         profile = next(n for n in archive.namelist() if 'Profile' in n)
@@ -115,6 +134,7 @@ DATA = Path(__file__).parent / 'data'
 
 
 def test_xrdml_preserves_explicit_optics_and_avoids_product_inference():
+    """Keep reported crystal and slit values and leave inferred optics fields absent."""
     details = read_panalytical_xrdml(str(DATA / 'm54313_om2th_10.xrdml'))['metadata'][
         'details'
     ]

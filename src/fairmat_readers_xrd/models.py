@@ -60,7 +60,14 @@ class XRDMetadata(BaseModel):
 
 
 class XRDOutput(BaseModel):
-    """Measured signals with reported coordinates, including fixed-angle scans."""
+    """
+    Output of a `read_*` function. Intensity is required.
+
+    2Theta can be a one-element array, a vector matching the last dimension
+    of the intensity array, or an array matching its full shape. It may be
+    omitted if the reported scan axis is Omega and the Omega array matches
+    the intensity shape.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
 
@@ -79,7 +86,7 @@ class XRDOutput(BaseModel):
     metadata: XRDMetadata | None = None
 
     @model_validator(mode='after')
-    def intensity_matches_two_theta(self):
+    def intensity_matches_two_theta(self) -> 'XRDOutput':
         if not self.intensity.shape:
             raise ValueError('intensity must contain measurement points')
         if self.two_theta is None:

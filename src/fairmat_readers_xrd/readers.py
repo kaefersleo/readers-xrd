@@ -17,7 +17,8 @@
 #
 import collections
 import xml.etree.ElementTree as ET
-from typing import TYPE_CHECKING, Any
+from collections.abc import Hashable
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import numpy as np
 import pint
@@ -46,11 +47,14 @@ from fairmat_readers_xrd.utils import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
     from structlog.stdlib import (
         BoundLogger,
     )
 
 ureg = pint.get_application_registry()
+_ScanValue = TypeVar('_ScanValue', bound=Hashable)
 
 
 def transfer_data_into_template(**kwargs):
@@ -78,7 +82,17 @@ def read_file(file_path: str) -> dict:
     raise NotImplementedError('Unknown file type.')
 
 
-def _common_scan_value(values, field, logger):
+def _common_scan_value(
+    values: 'Iterable[_ScanValue]', field: str, logger: 'BoundLogger | None'
+) -> _ScanValue | None:
+    """
+    Return the value shared by all scans, or None if there is no common value.
+
+    Args:
+        values: Reported values for the field across the scans.
+        field (str): Field name to include in warnings.
+        logger (BoundLogger or None): Logger for mixed values, if provided.
+    """
     values = set(values)
     if len(values) == 1:
         return values.pop()
@@ -89,7 +103,7 @@ def _common_scan_value(values, field, logger):
 
 @validate_output
 def read_panalytical_xrdml(
-    file_path: str, logger: 'BoundLogger' = None
+    file_path: str, logger: 'BoundLogger | None' = None
 ) -> dict[str, Any]:
     """
     Function for reading the X-ray diffraction data in a Panalytical `.xrdml` file.
@@ -129,7 +143,7 @@ def read_panalytical_xrdml(
     counting_time_value = []
     attenuation_values = []
     intensities_array = []
-    counts_array = []
+    counts_array: list[pint.Quantity | None] = []
 
     for scan_index, scan in enumerate(scans):
         data_points = scan.find('xrdml:dataPoints', ns)
@@ -161,16 +175,13 @@ def read_panalytical_xrdml(
             counts_array.append(None)
         else:
             counts = data_points.find('xrdml:counts', ns)
-            counts_array.append(
-                intensity_quantity(
-                    np.fromstring(counts.text, sep=' '), counts.get('unit')
-                )
+            scan_counts = intensity_quantity(
+                np.fromstring(counts.text, sep=' '), counts.get('unit')
             )
-            if not counts_array[-1].is_compatible_with('dimensionless'):
+            counts_array.append(scan_counts)
+            if not scan_counts.is_compatible_with('dimensionless'):
                 raise ValueError('XRDML counts must have count units, not rate units.')
-            intensities_array.append(
-                counts_array[-1] * scaling_factor * ureg.dimensionless
-            )
+            intensities_array.append(scan_counts * scaling_factor * ureg.dimensionless)
         n_points = len(intensities_array[-1])
 
         for axis in data_points.findall('xrdml:positions', ns):
@@ -195,7 +206,9 @@ def read_panalytical_xrdml(
             elif logger is not None:
                 logger.warning(f'Unknown data for {name} axis.')
 
-    scan_data = collections.defaultdict(list)
+    scan_data: dict[str, Sequence[pint.Quantity | None] | None] = (
+        collections.defaultdict(list)
+    )
     scan_data.update(axes)
     if any(
         not signal.is_compatible_with(intensities_array[0])
@@ -273,7 +286,9 @@ def read_panalytical_xrdml(
 
 
 @validate_output
-def read_rigaku_rasx(file_path: str, logger: 'BoundLogger' = None) -> dict[str, Any]:
+def read_rigaku_rasx(
+    file_path: str, logger: 'BoundLogger | None' = None
+) -> dict[str, Any]:
     """
     Reads .rasx files from Rigaku instruments
         - reader is based on IKZ module
@@ -286,7 +301,9 @@ def read_rigaku_rasx(file_path: str, logger: 'BoundLogger' = None) -> dict[str, 
         Dict[str, Any]: The X-ray diffraction data in a Python dictionary.
     """
     reader = RASXfile(file_path, verbose=False)
-    scan_data = reader.get_scan_data(logger)
+    scan_data = cast(
+        dict[str, list[pint.Quantity | None] | None], reader.get_scan_data(logger)
+    )
     source = reader.get_source_info()
 
     scan_infos = [
@@ -328,7 +345,9 @@ def read_rigaku_rasx(file_path: str, logger: 'BoundLogger' = None) -> dict[str, 
 
 
 @validate_output
-def read_bruker_brml(file_path: str, logger: 'BoundLogger' = None) -> dict[str, Any]:
+def read_bruker_brml(
+    file_path: str, logger: 'BoundLogger | None' = None
+) -> dict[str, Any]:
     """
     Reads .brml files from Bruker instruments
         - reader is based on IKZ module
@@ -382,8 +401,41 @@ def read_bruker_brml(file_path: str, logger: 'BoundLogger' = None) -> dict[str, 
 
 
 @validate_output
-def read_bruker_raw(file_path: str, logger: 'BoundLogger' = None) -> dict[str, Any]:
-    """Read one Locked Coupled RAW4 scan."""
+def read_bruker_raw(
+    file_path: str, logger: 'BoundLogger | None' = None
+) -> dict[str, Any]:
+    """
+    Read Bruker/Siemens RAW v4 binary files using native Python parser.
+
+    This function parses Bruker RAW v4 (magic header "RAW4.00") binary files directly
+    without requiring external conversion tools. The start angle, step size, and
+    number of points are extracted directly from the binary file. The scan axis
+    is reported as 2Theta.
+
+    Args:
+        file_path (str): Path to the Bruker .raw file.
+        logger (BoundLogger, optional): Logger instance for warnings/errors.
+
+    Returns:
+        Dict[str, Any]: XRD data dictionary compatible with nomad-measurements
+                        schema.
+
+    Raises:
+        ValueError: If the RAW file is invalid or the scan is unsupported.
+
+    Note:
+        - Only RAW v4 format is currently supported
+        - Designed for single-axis theta-2theta powder diffraction scans with
+          one Locked Coupled measurement range
+        - Multi-axis scans (texture, pole figures) are not supported
+        - No external files (.xrdml) are required
+
+    Citation for RAW format understanding:
+        Siemens/Bruker RAW format is proprietary but reverse-engineered
+        for open science data management. The original parser was based on
+        DIFFRAC.EVA output files. The current range and drive layouts follow
+        GSAS-II's G2pwd_BrukerRAW reader.
+    """
     parser = BrukerRAW4Parser(file_path)
     if logger is not None:
         parser.logger = logger
