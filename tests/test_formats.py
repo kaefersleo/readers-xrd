@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: The NOMAD Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Focused reader data contracts."""
+"""Test RAW4 parsing, RASX axes, XRDML optics, and wavelength references."""
 
 import struct
 from pathlib import Path
@@ -21,7 +21,7 @@ from fairmat_readers_xrd.metadata_extraction import raw_metadata
 from fairmat_readers_xrd.wavelengths import K_ALPHA_WAVELENGTHS
 
 
-def raw4_structure_raw4(
+def build_raw4_bytes(
     points: int = 5,
     record_size: int = 4,
     extra_size: int = 0,
@@ -67,9 +67,7 @@ def raw4_structure_raw4(
 def test_raw4_uses_declared_sizes(tmp_path, record_size, extra_size):
     """Read the scan after an unrecognized block and with varied record sizes."""
     path = tmp_path / 'scan.raw'
-    path.write_bytes(
-        raw4_structure_raw4(record_size=record_size, extra_size=extra_size)
-    )
+    path.write_bytes(build_raw4_bytes(record_size=record_size, extra_size=extra_size))
     result = read_bruker_raw(str(path))
     np.testing.assert_array_equal(result['intensity'].magnitude, [1, 2, 3, 4, 5])
     np.testing.assert_allclose(result['2Theta'].magnitude, 10 + np.arange(5) * 0.01)
@@ -88,7 +86,7 @@ def test_raw4_uses_declared_sizes(tmp_path, record_size, extra_size):
 def test_raw4_point_count_is_not_truncated_to_16_bits(tmp_path):
     path = tmp_path / 'large.raw'
     points = 65537
-    path.write_bytes(raw4_structure_raw4(points=points))
+    path.write_bytes(build_raw4_bytes(points=points))
     result = BrukerRAW4Parser(str(path)).parse()
     assert len(result['intensities']) == points
     assert result['intensities'][-1] == points
@@ -96,7 +94,7 @@ def test_raw4_point_count_is_not_truncated_to_16_bits(tmp_path):
 
 @pytest.mark.parametrize('bad', ['mode', 'truncated', 'block_length'])
 def test_raw4_rejects_unsupported_or_incomplete_data(tmp_path, bad):
-    content = raw4_structure_raw4(
+    content = build_raw4_bytes(
         mode='Rocking Curve' if bad == 'mode' else 'Locked Coupled'
     )
     if bad == 'truncated':
@@ -133,7 +131,7 @@ def test_rasx_omega_profile_is_not_two_theta(tmp_path):
 DATA = Path(__file__).parent / 'data'
 
 
-def test_xrdml_preserves_explicit_optics_and_avoids_product_inference():
+def test_xrdml_reads_optics_values_reported_in_the_file():
     """Keep reported crystal and slit values and leave inferred optics fields absent."""
     details = read_panalytical_xrdml(str(DATA / 'm54313_om2th_10.xrdml'))['metadata'][
         'details'

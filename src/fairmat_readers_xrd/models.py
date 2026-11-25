@@ -52,6 +52,7 @@ class XRDMetadata(BaseModel):
     instrument_id: str | None = None
     start_time: str | None = None
     end_time: str | None = None
+    # Metadata records grouped by category, with source paths for extracted values.
     details: dict[str, Any] | None = None
     scan_mode: str | None = None
     scan_axis: str | None = None
@@ -97,7 +98,9 @@ class XRDOutput(BaseModel):
             ):
                 raise ValueError('2Theta is required unless an Omega scan is reported')
             if self.Omega.shape != self.intensity.shape:
-                raise ValueError('Omega must match the reported scan intensity')
+                raise ValueError(
+                    'Without 2Theta, Omega and intensity must have the same shape.'
+                )
         elif self.two_theta.shape not in (
             (1,),
             (self.intensity.shape[-1],),

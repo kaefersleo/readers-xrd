@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: The NOMAD Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Focused reader data contracts."""
+"""Test signal units, scan shapes, BRML coordinates, and counting times."""
 
 from collections.abc import Iterable
 from pathlib import Path
@@ -98,7 +98,7 @@ def test_constant_signals_keep_all_points_and_repeated_scans(channels, rows):
 
 
 def test_brml_omega_matches_recorded_scan_coordinates(tmp_path):
-    """Verify that a recorded Omega change survives with the same scan endpoints."""
+    """Check the recorded Omega positions, including a changed point inside the scan."""
     path = Path(__file__).parent / 'data/23-012-AG_2thomegascan_long.brml'
     with ZipFile(path) as source:
         root = ET.fromstring(source.read('Experiment0/RawData0.xml'))
@@ -143,7 +143,7 @@ def test_brml_omega_matches_recorded_scan_coordinates(tmp_path):
         ('CONTINUOUS', 1, 'deg/min', -0.04, 2.4),
     ],
 )
-def test_rasx_modes_have_distinct_time_meanings(mode, speed, unit, step, expected):
+def test_rasx_calculates_counting_time_by_scan_mode(mode, speed, unit, step, expected):
     """Check that STEP uses a duration and CONTINUOUS divides step size by speed."""
     result = rasx_counting_time(
         dict(Mode=mode, Speed=speed, SpeedUnit=unit, Step=step, PositionUnit='deg')

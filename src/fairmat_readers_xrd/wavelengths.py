@@ -18,7 +18,8 @@ K_ALPHA_WAVELENGTHS = {
     'In': (0.5121251, 0.5165572),
 }
 
-# Kα references are shared with NM; retain the existing Kβ values and 2:1 ratio.
+# Kα references are shared with NM. RAW4 fallbacks also include Kβ wavelengths
+# and a Kα2/Kα1 intensity ratio of 0.5.
 XRAY_WAVELENGTHS = {
     material: {
         'K_alpha1': K_ALPHA_WAVELENGTHS[material][0],

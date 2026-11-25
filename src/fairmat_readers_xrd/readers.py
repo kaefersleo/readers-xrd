@@ -97,7 +97,9 @@ def _common_scan_value(
     if len(values) == 1:
         return values.pop()
     if logger is not None and values:
-        logger.warning(f'Mixed scan {field}; omitting common metadata.')
+        logger.warning(
+            f'Omitting shared {field}: values differ or are missing across scans.'
+        )
     return None
 
 

@@ -59,7 +59,7 @@ def test_rasx_reader():
     ]
     for path in file_path:
         output = read_rigaku_rasx(path)
-        # Optional metadata has dedicated value/provenance tests.
+        # The JSON fixtures omit metadata['details'].
         assert output['metadata'].pop('details') is not None
         convert_quantity_to_string(output)
         with open(f'{path}.json', encoding='utf-8') as f:
@@ -75,7 +75,7 @@ def test_xrdml_reader():
     ]
     for path in file_path:
         output = read_panalytical_xrdml(path)
-        # Optional metadata has dedicated value/provenance tests.
+        # The JSON fixtures omit metadata['details'].
         assert output['metadata'].pop('details') is not None
         convert_quantity_to_string(output)
         with open(f'{path}.json', encoding='utf-8') as f:
@@ -90,7 +90,7 @@ def test_brml_reader():
     ]
     for path in file_path:
         output = read_bruker_brml(path)
-        # Optional metadata has dedicated value/provenance tests.
+        # The JSON fixtures omit metadata['details'].
         assert output['metadata'].pop('details') is not None
         convert_quantity_to_string(output)
         with open(f'{path}.json', encoding='utf-8') as f:

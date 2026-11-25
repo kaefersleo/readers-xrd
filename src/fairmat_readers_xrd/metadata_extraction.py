@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""Explicit, optional measurement metadata; independent of any archive schema."""
+"""Read sample, instrument, and scan metadata and record where each value was read."""
 
 import hashlib
 import re
@@ -40,7 +40,7 @@ def _text(value: object) -> str | None:
 
 
 def _key(prefix: str, value: object) -> str:
-    """Keep distinct source identities even when their display labels coincide."""
+    """Build a record key from a readable label and a hash of the original value."""
     label = re.sub(r'[^a-zA-Z0-9_]+', '_', str(value)).strip('_')[:40]
     digest = hashlib.sha256(str(value).encode()).hexdigest()[:10]
     return f'{prefix}_{label}_{digest}'
@@ -86,10 +86,10 @@ def _same(left: Any, right: Any) -> bool:
     return np.array_equal(left, right)
 
 
-def _collapse(
+def _merge_records_by_key(
     records: list[dict[str, Any]], logger: 'BoundLogger | None' = None
 ) -> list[dict[str, Any]]:
-    """Merge identical scan headers; omit conflicting fields instead of picking one."""
+    """Merge records by key and keep fields whose values agree across all records."""
     groups: dict[str, list[dict[str, Any]]] = {}
     for record in records:
         groups.setdefault(record['key'], []).append(record)
@@ -102,7 +102,7 @@ def _collapse(
             if not all(_same(candidates[0], value) for value in candidates[1:]):
                 if logger is not None:
                     logger.warning(
-                        f'Mixed scan metadata {key}/{name}; omitting common value.'
+                        f'Omitting {key}/{name} because values differ or are missing.'
                     )
                 continue
             values[name] = candidates[0]
@@ -116,12 +116,12 @@ def _collapse(
     return output
 
 
-def _quantity(
+def _parse_metadata_quantity(
     text: str | float | None,
     unit: str | None,
     path: str,
     logger: 'BoundLogger | None',
-    category: str | None = None,
+    compatible_unit: str | None = None,
 ) -> pint.Quantity | None:
     """
     Read an optional metadata value as a finite Pint quantity.
@@ -131,7 +131,7 @@ def _quantity(
         unit (str): Unit reported in the source file.
         path (str): Source path to include in warnings.
         logger (BoundLogger or None): Logger for invalid values, if provided.
-        category (str, optional): Unit the reported quantity must be compatible with.
+        compatible_unit (str, optional): Unit the value must be compatible with.
 
     Returns:
         pint.Quantity or None: The reported quantity, or None if it is missing
@@ -143,7 +143,7 @@ def _quantity(
         value = float(text) * ureg(unit)
         if not np.isfinite(value.magnitude):
             raise ValueError('Non-finite value')
-        if category and not value.is_compatible_with(category):
+        if compatible_unit and not value.is_compatible_with(compatible_unit):
             raise ValueError('Incompatible unit')
         return value
     except (ValueError, TypeError, pint.PintError):
@@ -232,7 +232,7 @@ def xrdml_metadata(
                     {'text': f'{base}/source/instrumentControlSoftware'},
                 )
             )
-    # Empty headers must still participate in common-value checks.
+    # Omit the shared acquisition program if any scan lacks a program name.
     programs = details['program']
     if any(not record['values'].get('name') for record in programs):
         if any(record['values'] for record in programs) and logger is not None:
@@ -323,7 +323,7 @@ def xrdml_metadata(
                         unit = 'meter'
                         family = 'apertures'
                     child = node.find(f'xrdml:{child_name}', ns)
-                    values[field] = _quantity(
+                    values[field] = _parse_metadata_quantity(
                         child.text if child is not None else None,
                         child.get('unit') if child is not None else None,
                         f'{base}/{child_name}',
@@ -332,8 +332,7 @@ def xrdml_metadata(
                     )
                     sources[field] = f'{base}/{child_name}'
                     values['description'] = (
-                        f'Reported {side}/{tag}; '
-                        f'{child_name} is the supplied opening dimension.'
+                        f'{tag} in {side}. Opening field: {child_name}.'
                     )
                     sources['description'] = base
                 elif tag == 'beamAttenuator':
@@ -345,7 +344,10 @@ def xrdml_metadata(
                 else:
                     family = 'mirrors' if tag == 'xRayMirror' else 'collimators'
                 details.setdefault(family, []).append(_record(key, values, sources))
-    return {family: _collapse(records, logger) for family, records in details.items()}
+    return {
+        family: _merge_records_by_key(records, logger)
+        for family, records in details.items()
+    }
 
 
 def rasx_metadata(
@@ -426,7 +428,8 @@ def rasx_metadata(
                         {'text': f'{base}/HWConfigurations/Optics/{name}'},
                     )
                 )
-    # Only geometric, fixed, explicitly unit-bearing axes become positioner values.
+    # Keep fixed positions for the axes below when every profile reports
+    # a position in compatible angular or length units.
     axes = {
         'ThetaS',
         'ThetaD',
@@ -450,7 +453,7 @@ def rasx_metadata(
         ):
             continue
         values = [
-            _quantity(
+            _parse_metadata_quantity(
                 axis.Position,
                 axis.Unit,
                 f'{reader.metadata_paths[index]}/Axes/{name}/@Position',
@@ -474,10 +477,7 @@ def rasx_metadata(
                 _key('rasx_axis', name),
                 {
                     'name': name,
-                    'description': (
-                        'Reported fixed axis position, in original profile order; '
-                        'no target or time axis inferred.'
-                    ),
+                    'description': 'Fixed axis positions in RASX profile order.',
                     'value': np.array([value.to(unit).magnitude for value in values])
                     * unit,
                 },
@@ -496,7 +496,10 @@ def rasx_metadata(
                 },
             )
         )
-    return {family: _collapse(records, logger) for family, records in details.items()}
+    return {
+        family: _merge_records_by_key(records, logger)
+        for family, records in details.items()
+    }
 
 
 def _as_list(
@@ -530,7 +533,7 @@ def brml_metadata(
         ):
             continue
         positions = [
-            _quantity(
+            _parse_metadata_quantity(
                 entry.get('Value'), entry.get('Unit'), f'Drives/{name}/Position', logger
             )
             for entry in entries
@@ -552,7 +555,7 @@ def brml_metadata(
                 {
                     'name': name,
                     'description': (
-                        'Reported fixed drive position, in original RawData order.'
+                        'Fixed drive positions recorded in RawData block order.'
                     ),
                     'value': np.array([value.to(unit).magnitude for value in positions])
                     * unit,
@@ -623,7 +626,7 @@ def brml_metadata(
                     ):
                         field = 'SlitWidth' if 'SlitWidth' in node else 'Height'
                         size = node.get(field, {})
-                        values['size'] = _quantity(
+                        values['size'] = _parse_metadata_quantity(
                             size.get('@Value'),
                             size.get('@Unit'),
                             f'{base}/{field}',
@@ -632,7 +635,7 @@ def brml_metadata(
                         )
                         sources['size'] = f'{base}/{field}/@Value'
                         values['description'] = (
-                            f'Reported {side} aperture; opening dimension {field}.'
+                            f'Slit in {side}. Opening field: {field}.'
                         )
                         sources['description'] = base
                         family = 'apertures'
@@ -657,7 +660,10 @@ def brml_metadata(
                     {},
                 )
             )
-    return {family: _collapse(records, logger) for family, records in details.items()}
+    return {
+        family: _merge_records_by_key(records, logger)
+        for family, records in details.items()
+    }
 
 
 def raw_metadata(metadata: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:

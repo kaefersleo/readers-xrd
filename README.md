@@ -30,10 +30,10 @@ raw_file_path = "<filepath>.raw"
 raw_data_dict = read_bruker_raw(raw_file_path)
 ```
 
-The readers return Python dictionaries with measurement data, physical quantities
-with units, and available metadata. The original order of scans and measurement
-points is preserved. Count-scale signals are dimensionless, and signals declared
-in supported count-rate units are returned in `count/s`. When available,
+The readers return a Python dictionary with intensity and available scan
+coordinates as Pint quantities, plus metadata. The original order of scans and
+measurement points is preserved. Count-scale signals are dimensionless, and
+signals declared in supported count-rate units are returned in `count/s`. When available,
 `countTime` gives the nominal acquisition time per point in seconds, distinct
 from the total measurement duration and detector live time. Missing metadata
 fields are omitted or set to `None`.

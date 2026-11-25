@@ -181,7 +181,10 @@ class BrukerRAW4Parser:
             value = raw_value
             # Zero wavelengths are unreported; a zero intensity ratio is valid.
             if not np.isfinite(value) or value < 0:
-                self.logger.warning(f'Ignoring invalid RAW4 source value {key}.')
+                self.logger.warning(
+                    f'Invalid RAW4 source value for {key}. '
+                    'Using a reference value when available.'
+                )
                 value = fallback.get(fallback_key)
             elif value == 0 and key != 'kalpha2_kalpha1_ratio':
                 value = None

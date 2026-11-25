@@ -136,7 +136,7 @@ def detect_scan_type(scan_data: dict[str, Any]) -> str:
             len(values) != count or any(value is None for value in values)
         ):
             raise ValueError(
-                f'Incomplete XRD axis {key}; positions cannot be assigned to scans.'
+                f'Expected one {key} position array per scan, with no missing entries.'
             )
     if len(scan_data['intensity']) == 1:
         return 'line'
@@ -186,10 +186,8 @@ def modify_scan_data(
 
     If the scan type is `rsm`, data is converted into 2D arrays in the unit of
     the first scan for each field. Intensities, counts, and counting times with
-    multiple values per scan remain 2D. Reduction of dimensions is performed
-    for shared coordinates and other optional data where possible. For example,
-    an axis with one coordinate per scan can be represented as a 1D vector,
-    and identical coordinate rows can be reduced to the first row.
+    multiple values per scan remain 2D. Use a 1D vector for axes with one
+    position per scan. Use a single row when the coordinate rows are identical.
 
     Args:
         scan_data (dict): The X-ray diffraction data in a Python dictionary. Each value

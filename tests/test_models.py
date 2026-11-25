@@ -121,7 +121,7 @@ def test_fixed_and_unreported_two_theta_in_omega_scan():
     XRDOutput.model_validate(output)
 
 
-def test_optional_metadata_preserves_scan_boundaries_and_source_details():
+def test_output_accepts_end_time_and_user_metadata():
     output = _minimal_output()
     output['metadata'] = {
         'end_time': '2026-11-16T12:00:00+01:00',

@@ -15,7 +15,11 @@ ureg = pint.get_application_registry()
 def counting_time(
     value: ArrayLike | None, unit: str | None, logger: 'BoundLogger | None' = None
 ) -> pint.Quantity | None:
-    """Return positive finite times in seconds, or omit unusable optional metadata."""
+    """
+    Convert positive, finite counting times to seconds.
+
+    Return None for missing or invalid input.
+    """
     if value is None or unit is None:
         return None
     try:
@@ -58,7 +62,7 @@ def rasx_counting_time(
 def complete_scan_times(
     values: list[pint.Quantity | None], logger: 'BoundLogger | None' = None
 ) -> list[pint.Quantity | None] | None:
-    """Keep scan order; omit incomplete metadata instead of inventing missing times."""
+    """Return times in scan order, or None if the list is empty or a time is missing."""
     if not values or any(value is None for value in values):
         if any(value is not None for value in values) and logger is not None:
             logger.warning(

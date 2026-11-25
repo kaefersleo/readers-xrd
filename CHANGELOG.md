@@ -17,11 +17,14 @@
 
 ### Fixed
 
-- Warn once when an XRDML measurement contains mixed scan axes.
-- Retain strict output validation with compact fixed angles, reported Omega scans
-  and optional provenance metadata; return RAW4 source values as quantities.
+- Omit the shared XRDML scan-axis label when scans disagree. Warn once about the
+  axis if a logger is supplied.
+- Accept a single fixed 2Theta value. A reported Omega scan may omit 2Theta when
+  Omega and intensity have the same shape. Return RAW4 source values as Pint
+  quantities.
 
 - Respect RAW4 block lengths, record sizes and point counts; reject unsupported
   modes, multiple ranges and truncated input.
-- Preserve repeated spectra and single-point shapes. Follow per-profile RASX axes
-  and recorded BRML coordinates; omit incomplete optional arrays without inventing data.
+- Keep all intensity and count samples in repeated scans and single-point scans.
+  Use the axis reported by each RASX profile and prefer recorded BRML coordinates.
+  Omit nominal counting times if any scan lacks a valid time.
